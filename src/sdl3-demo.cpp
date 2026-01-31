@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "SDL3/SDL_keyboard.h"
 #include "gameobject.h"
 
 using namespace std;
@@ -14,6 +15,11 @@ struct SDLState
 	SDL_Window *window;
 	SDL_Renderer *renderer;
 	int width, height, logW, logH;
+	bool const *keys;
+
+	SDLState() : keys(SDL_GetKeyboardState(nullptr))
+	{
+	}
 };
 
 size_t const LAYER_IDX_LEVEL = 0;
@@ -33,10 +39,11 @@ struct GameState
 struct Resources
 {
 	int const ANIM_PLAYER_IDLE = 0;
+	int const ANIM_PLAYER_RUN = 1;
 	std::vector<Animation> playerAnims;
 
 	std::vector<SDL_Texture *> textures;
-	SDL_Texture *texIdle;
+	SDL_Texture *texIdle, *texRun;
 
 	SDL_Texture *loadTextures(SDL_Renderer *renderer, std::string const &filepath)
 	{
@@ -50,8 +57,10 @@ struct Resources
 	{
 		playerAnims.resize(5);
 		playerAnims[ANIM_PLAYER_IDLE] = Animation(8, 1.6f);
+		playerAnims[ANIM_PLAYER_RUN] = Animation(4, 0.5f);
 
 		texIdle = loadTextures(state.renderer, "data/idle.png");
+		texRun = loadTextures(state.renderer, "data/run.png");
 	}
 
 	void unload()
@@ -66,6 +75,7 @@ struct Resources
 bool initialize(SDLState &state);
 void cleanup(SDLState &state);
 void drawObject(SDLState const &state, GameState &gs, GameObject &obj, float deltaTime);
+void update(SDLState const &state, GameState &gs, Resources &res, GameObject &obj, float deltaTime);
 
 int main(int argc, char *argv[])
 {
@@ -89,12 +99,14 @@ int main(int argc, char *argv[])
 	// Create our player
 	GameObject player;
 	player.type = ObjectType::player;
+	player.data.player = PlayerData();
 	player.texture = res.texIdle;
 	player.animations = res.playerAnims;
 	player.currentAnimation = res.ANIM_PLAYER_IDLE;
+	player.acceleration = glm::vec2(300, 0);
+	player.maxSpeedX = 100;
 	gs.layers[LAYER_IDX_CHARACTERS].push_back(player);
 
-	bool const *keys = SDL_GetKeyboardState(nullptr);
 	uint64_t prevTime = SDL_GetTicks();
 
 	// Start the game loop
@@ -127,6 +139,9 @@ int main(int argc, char *argv[])
 		{
 			for (GameObject &obj : layer)
 			{
+				update(state, gs, res, obj, deltaTime);
+
+				// Update the animation
 				if (obj.currentAnimation != -1)
 				{
 					obj.animations[obj.currentAnimation].step(deltaTime);
@@ -203,7 +218,7 @@ void cleanup(SDLState &state)
 void drawObject(SDLState const &state, GameState &gs, GameObject &obj, float deltaTime)
 {
 	float const spriteSize = 32;
-	float srcX = obj.currentAnimation =! -1
+	float srcX = obj.currentAnimation != -1
 		? obj.animations[obj.currentAnimation].currentFrame() * spriteSize
 		: 0.0f
 	;
@@ -224,4 +239,75 @@ void drawObject(SDLState const &state, GameState &gs, GameObject &obj, float del
 
 	SDL_FlipMode flipMode = obj.direction == -1 ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
 	SDL_RenderTextureRotated(state.renderer, obj.texture, &src, &dst, 0, nullptr, flipMode);
+}
+
+void update(SDLState const &state, GameState &gs, Resources &res, GameObject &obj, float deltaTime)
+{
+	if (obj.type == ObjectType::player)
+	{
+		float currentDirection = 0;
+		if (state.keys[SDL_SCANCODE_A])
+		{
+			currentDirection -= 1;
+		}
+		if (state.keys[SDL_SCANCODE_D])
+		{
+			currentDirection += 1;
+		}
+		if (currentDirection)
+		{
+			obj.direction = currentDirection;
+		}
+
+		switch (obj.data.player.state)
+		{
+			case PlayerState::idle:
+			{
+				if (currentDirection)
+				{
+					obj.data.player.state = PlayerState::running;
+					obj.texture = res.texRun;
+					obj.currentAnimation = res.ANIM_PLAYER_RUN;
+				}
+				else
+				{
+					// Decelerate
+					if (obj.velocity.x)
+					{
+						float const factor = obj.velocity.x > 0 ? -1.5f : 1.5f;
+						float amount = factor * obj.acceleration.x * deltaTime;
+						if (std::abs(obj.velocity.x) < std::abs(amount))
+						{
+							obj.velocity.x = 0;
+						}
+						else
+						{
+							obj.velocity.x += amount;
+						}
+					}
+				}
+				break;
+			}
+			case PlayerState::running:
+			{
+				if (!currentDirection)
+				{
+					obj.data.player.state = PlayerState::idle;
+					obj.texture = res.texIdle;
+					obj.currentAnimation = res.ANIM_PLAYER_IDLE;
+				}
+				break;
+			}
+		}
+
+		// Add acceleration to velocity
+		obj.velocity += currentDirection * obj.acceleration * deltaTime;
+		if (std::abs(obj.velocity.x) > obj.maxSpeedX)
+		{
+			obj.velocity.x = currentDirection * obj.maxSpeedX;
+		}
+
+		// Add velocity to position
+		obj.position += obj.velocity * deltaTime;
+	}
 }
