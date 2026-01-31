@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "SDL3/SDL_keyboard.h"
+#include "SDL3/SDL_render.h"
 #include "gameobject.h"
 
 using namespace std;
@@ -24,6 +25,9 @@ struct SDLState
 
 size_t const LAYER_IDX_LEVEL = 0;
 size_t const LAYER_IDX_CHARACTERS = 1;
+int const MAP_ROWS = 5;
+int const MAP_COLS = 50;
+int const TILE_SIZE = 32;
 
 struct GameState
 {
@@ -43,7 +47,7 @@ struct Resources
 	std::vector<Animation> playerAnims;
 
 	std::vector<SDL_Texture *> textures;
-	SDL_Texture *texIdle, *texRun;
+	SDL_Texture *texIdle, *texRun, *texBrick, *texGrass, *texGround, *texPanel;
 
 	SDL_Texture *loadTextures(SDL_Renderer *renderer, std::string const &filepath)
 	{
@@ -61,6 +65,10 @@ struct Resources
 
 		texIdle = loadTextures(state.renderer, "data/idle.png");
 		texRun = loadTextures(state.renderer, "data/run.png");
+		texBrick = loadTextures(state.renderer, "data/tiles/brick.png");
+		texGrass = loadTextures(state.renderer, "data/tiles/grass.png");
+		texGround = loadTextures(state.renderer, "data/tiles/ground.png");
+		texPanel = loadTextures(state.renderer, "data/tiles/panel.png");
 	}
 
 	void unload()
@@ -76,6 +84,7 @@ bool initialize(SDLState &state);
 void cleanup(SDLState &state);
 void drawObject(SDLState const &state, GameState &gs, GameObject &obj, float deltaTime);
 void update(SDLState const &state, GameState &gs, Resources &res, GameObject &obj, float deltaTime);
+void createTiles(SDLState const &state, GameState &gs, Resources &res);
 
 int main(int argc, char *argv[])
 {
@@ -96,17 +105,7 @@ int main(int argc, char *argv[])
 
 	// Setup game data
 	GameState gs;
-	// Create our player
-	GameObject player;
-	player.type = ObjectType::player;
-	player.data.player = PlayerData();
-	player.texture = res.texIdle;
-	player.animations = res.playerAnims;
-	player.currentAnimation = res.ANIM_PLAYER_IDLE;
-	player.acceleration = glm::vec2(300, 0);
-	player.maxSpeedX = 100;
-	gs.layers[LAYER_IDX_CHARACTERS].push_back(player);
-
+	createTiles(state, gs, res);
 	uint64_t prevTime = SDL_GetTicks();
 
 	// Start the game loop
@@ -243,6 +242,12 @@ void drawObject(SDLState const &state, GameState &gs, GameObject &obj, float del
 
 void update(SDLState const &state, GameState &gs, Resources &res, GameObject &obj, float deltaTime)
 {
+	// Apply some gravity
+	if (obj.dynamic)
+	{
+		obj.velocity += glm::vec2(0, 500) * deltaTime;
+	}
+
 	if (obj.type == ObjectType::player)
 	{
 		float currentDirection = 0;
@@ -309,5 +314,67 @@ void update(SDLState const &state, GameState &gs, Resources &res, GameObject &ob
 
 		// Add velocity to position
 		obj.position += obj.velocity * deltaTime;
+	}
+}
+
+void createTiles(SDLState const &state, GameState &gs, Resources &res)
+{
+	/*
+		1 - Ground
+		2 - Panel
+		3 - Enemy
+		4 - Player
+		5 - Grass
+		6 - Brick
+	*/
+	short map[MAP_ROWS][MAP_COLS] = {
+		4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	};
+
+	auto const createObject = [&state](int r, int c, SDL_Texture *tex, ObjectType type)
+	{
+		GameObject o;
+		o.type = type;
+		o.position = glm::vec2(c * TILE_SIZE, state.logH - (MAP_ROWS - r) * TILE_SIZE);
+		o.texture = tex;
+		return o;
+	};
+
+	for (int r = 0; r < MAP_ROWS; r++)
+	{
+		for (int c = 0; c < MAP_COLS; c++)
+		{
+			switch (map[r][c])
+			{
+				case 1: // ground
+				{
+					GameObject ground = createObject(r, c, res.texGround, ObjectType::level);
+					gs.layers[LAYER_IDX_LEVEL].push_back(ground);
+					break;
+				}
+				case 2: // ground
+				{
+					GameObject panel = createObject(r, c, res.texPanel, ObjectType::level);
+					gs.layers[LAYER_IDX_LEVEL].push_back(panel);
+					break;
+				}
+				case 4: // player
+				{
+					GameObject player = createObject(r, c, res.texIdle, ObjectType::player);
+					player.data.player = PlayerData();
+					player.animations = res.playerAnims;
+					player.currentAnimation = res.ANIM_PLAYER_IDLE;
+					player.acceleration = glm::vec2(300, 0);
+					player.maxSpeedX = 100;
+					player.dynamic = true;
+					gs.layers[LAYER_IDX_CHARACTERS].push_back(player);
+					break;
+				}
+			}
+		}
 	}
 }

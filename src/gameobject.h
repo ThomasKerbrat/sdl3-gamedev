@@ -43,6 +43,7 @@ struct GameObject
 	std::vector<Animation> animations;
 	int currentAnimation;
 	SDL_Texture *texture;
+	bool dynamic;
 
 	GameObject() : data { .level = LevelData() }
 	{
@@ -52,5 +53,6 @@ struct GameObject
 		position = velocity = acceleration = glm::vec2(0);
 		currentAnimation = -1;
 		texture = nullptr;
+		dynamic = false;
 	}
 };
