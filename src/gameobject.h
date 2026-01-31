@@ -2,6 +2,7 @@
 #include <vector>
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
+#include "SDL3/SDL_rect.h"
 #include "animation.h"
 
 enum class PlayerState
@@ -44,8 +45,9 @@ struct GameObject
 	int currentAnimation;
 	SDL_Texture *texture;
 	bool dynamic;
+	SDL_FRect collider;
 
-	GameObject() : data { .level = LevelData() }
+	GameObject() : data { .level = LevelData() }, collider { 0 }
 	{
 		type = ObjectType::level;
 		direction = 1;

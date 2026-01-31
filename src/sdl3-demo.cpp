@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "SDL3/SDL_keyboard.h"
+#include "SDL3/SDL_rect.h"
 #include "SDL3/SDL_render.h"
 #include "gameobject.h"
 
@@ -85,6 +86,7 @@ void cleanup(SDLState &state);
 void drawObject(SDLState const &state, GameState &gs, GameObject &obj, float deltaTime);
 void update(SDLState const &state, GameState &gs, Resources &res, GameObject &obj, float deltaTime);
 void createTiles(SDLState const &state, GameState &gs, Resources &res);
+void checkCollisions(SDLState const &state, GameState &gs, Resources &res, GameObject &a, GameObject &b, float deltaTime);
 
 int main(int argc, char *argv[])
 {
@@ -311,9 +313,91 @@ void update(SDLState const &state, GameState &gs, Resources &res, GameObject &ob
 		{
 			obj.velocity.x = currentDirection * obj.maxSpeedX;
 		}
+	}
 
-		// Add velocity to position
-		obj.position += obj.velocity * deltaTime;
+	// Add velocity to position
+	obj.position += obj.velocity * deltaTime;
+
+	// Handle collision detection
+	for (auto &layer : gs.layers)
+	{
+		for (GameObject &objB : layer)
+		{
+			if (&obj != &objB)
+			{
+				checkCollisions(state, gs, res, obj, objB, deltaTime);
+			}
+		}
+	}
+}
+
+void collisionResponse(SDLState const &state, GameState &gs, Resources &res,
+	SDL_FRect &rectA, SDL_FRect &rectB, SDL_FRect &rectC,
+	GameObject &objA, GameObject &objB, float deltaTime)
+{
+	// Object we are checking
+	if (objA.type == ObjectType::player)
+	{
+		// Object it is colliding with
+		switch (objB.type)
+		{
+			case ObjectType::level:
+			{
+				if (rectC.w < rectC.h)
+				{
+					// Horizontal collision
+					if (objA.velocity.x > 0)
+					{
+						objA.position.x -= rectC.w; // going right
+					}
+					else if (objA.velocity.x < 0)
+					{
+						objA.position.x += rectC.w; // going left
+					}
+					objA.velocity.x = 0;
+				}
+				else
+				{
+					// Vertical collision
+					if (objA.velocity.y > 0)
+					{
+						objA.position.y -= rectC.h; // going down
+					}
+					else if (objA.velocity.y < 0)
+					{
+						objA.position.y += rectC.h; // going up
+					}
+					objA.velocity.y = 0;
+				}
+				break;
+			}
+		}
+	}
+}
+
+void checkCollisions(SDLState const &state, GameState &gs, Resources &res,
+	GameObject &a, GameObject &b, float deltaTime)
+{
+	SDL_FRect rectA {
+		.x = a.position.x + a.collider.x,
+		.y = a.position.y + a.collider.y,
+		.w = a.collider.w,
+		.h = a.collider.h,
+	};
+
+	SDL_FRect rectB {
+		.x = b.position.x + b.collider.x,
+		.y = b.position.y + b.collider.y,
+		.w = b.collider.w,
+		.h = b.collider.h,
+	};
+
+	SDL_FRect rectC { 0 };
+
+	if (SDL_GetRectIntersectionFloat(&rectA, &rectB, &rectC))
+	{
+		// Found intersection, respond accordingly
+		collisionResponse(state, gs, res, rectA, rectB, rectC, a, b, deltaTime);
 	}
 }
 
@@ -328,8 +412,8 @@ void createTiles(SDLState const &state, GameState &gs, Resources &res)
 		6 - Brick
 	*/
 	short map[MAP_ROWS][MAP_COLS] = {
-		4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -341,6 +425,7 @@ void createTiles(SDLState const &state, GameState &gs, Resources &res)
 		o.type = type;
 		o.position = glm::vec2(c * TILE_SIZE, state.logH - (MAP_ROWS - r) * TILE_SIZE);
 		o.texture = tex;
+		o.collider = { .x = 0, .y = 0, .w = TILE_SIZE, .h = TILE_SIZE };
 		return o;
 	};
 
@@ -371,6 +456,7 @@ void createTiles(SDLState const &state, GameState &gs, Resources &res)
 					player.acceleration = glm::vec2(300, 0);
 					player.maxSpeedX = 100;
 					player.dynamic = true;
+					player.collider = { .x = 11, .y = 6, .w = 10, .h = 26 };
 					gs.layers[LAYER_IDX_CHARACTERS].push_back(player);
 					break;
 				}
