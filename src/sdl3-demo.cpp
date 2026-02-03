@@ -37,6 +37,7 @@ struct GameState
 	int playerIndex;
 	SDL_FRect mapViewport;
 	float bg2Scroll, bg3Scroll, bg4Scroll;
+	bool debugMode;
 
 	GameState(SDLState const &state)
 	{
@@ -48,6 +49,7 @@ struct GameState
 			.h = static_cast<float>(state.logW),
 		};
 		bg2Scroll = bg3Scroll = bg4Scroll = 0;
+		debugMode = false;
 	}
 
 	GameObject &player() { return layers[LAYER_IDX_CHARACTERS][playerIndex]; }
@@ -178,6 +180,10 @@ int main(int argc, char *argv[])
 				case SDL_EVENT_KEY_UP:
 				{
 					handleKeyInput(state, gs, gs.player(), event.key.scancode, false);
+					if (event.key.scancode == SDL_SCANCODE_F12)
+					{
+						gs.debugMode = !gs.debugMode;
+					}
 					break;
 				}
 			}
@@ -263,13 +269,16 @@ int main(int argc, char *argv[])
 		}
 
 		// Display some debug info
-		SDL_SetRenderDrawColor(state.renderer, 255, 255, 255, 255);
-		SDL_RenderDebugText(state.renderer, 5, 5, std::format(
-			"S: {}, B: {}, G: {}",
-			static_cast<int>(gs.player().data.player.state),
-			gs.bullets.size(),
-			gs.player().grounded
-		).c_str());
+		if (gs.debugMode)
+		{
+			SDL_SetRenderDrawColor(state.renderer, 255, 255, 255, 255);
+			SDL_RenderDebugText(state.renderer, 5, 5, std::format(
+				"S: {}, B: {}, G: {}",
+				static_cast<int>(gs.player().data.player.state),
+				gs.bullets.size(),
+				gs.player().grounded
+			).c_str());
+		}
 
 		// Swap buffers and present
 		SDL_RenderPresent(state.renderer);
@@ -348,12 +357,34 @@ void drawObject(SDLState const &state, GameState &gs, GameObject &obj, float wid
 
 	SDL_FlipMode flipMode = obj.direction == -1 ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
 	SDL_RenderTextureRotated(state.renderer, obj.texture, &src, &dst, 0, nullptr, flipMode);
+
+	if (gs.debugMode)
+	{
+		SDL_FRect rectA {
+			.x = obj.position.x + obj.collider.x - gs.mapViewport.x,
+			.y = obj.position.y + obj.collider.y,
+			.w = obj.collider.w,
+			.h = obj.collider.h,
+		};
+		SDL_FRect rectB {
+			.x = obj.position.x + obj.collider.x - gs.mapViewport.x,
+			.y = obj.position.y + obj.collider.y + obj.collider.h,
+			.w = obj.collider.w,
+			.h = 1,
+		};
+		SDL_SetRenderDrawBlendMode(state.renderer, SDL_BLENDMODE_BLEND);
+		SDL_SetRenderDrawColor(state.renderer, 255, 0, 0, 150);
+		SDL_RenderFillRect(state.renderer, &rectA);
+		SDL_SetRenderDrawColor(state.renderer, 0, 0, 255, 150);
+		SDL_RenderFillRect(state.renderer, &rectB);
+		SDL_SetRenderDrawBlendMode(state.renderer, SDL_BLENDMODE_NONE);
+	}
 }
 
 void update(SDLState const &state, GameState &gs, Resources &res, GameObject &obj, float deltaTime)
 {
 	// Apply some gravity
-	if (obj.dynamic)
+	if (obj.dynamic && !obj.grounded)
 	{
 		obj.velocity += glm::vec2(0, 500) * deltaTime;
 	}
@@ -452,9 +483,6 @@ void update(SDLState const &state, GameState &gs, Resources &res, GameObject &ob
 				}
 
 				handleShooting(res.texIdle, res.texShoot, res.ANIM_PLAYER_IDLE, res.ANIM_PLAYER_SHOOT);
-				// obj.texture = res.texIdle;
-				// obj.currentAnimation = res.ANIM_PLAYER_IDLE;
-
 				break;
 			}
 			case PlayerState::running:
@@ -469,22 +497,16 @@ void update(SDLState const &state, GameState &gs, Resources &res, GameObject &ob
 				if (obj.velocity.x * obj.direction < 0 && obj.grounded)
 				{
 					handleShooting(res.texSlide, res.texSlideShoot, res.ANIM_PLAYER_SLIDE_SHOOT, res.ANIM_PLAYER_SLIDE_SHOOT);
-					// obj.texture = res.texSlide;
-					// obj.currentAnimation = res.ANIM_PLAYER_SLIDE;
 				}
 				else
 				{
 					handleShooting(res.texRun, res.texRunShoot, res.ANIM_PLAYER_RUN, res.ANIM_PLAYER_RUN);
-					// obj.texture = res.texRun;
-					// obj.currentAnimation = res.ANIM_PLAYER_RUN;
 				}
 				break;
 			}
 			case PlayerState::jumping:
 			{
 				handleShooting(res.texRun, res.texRunShoot, res.ANIM_PLAYER_RUN, res.ANIM_PLAYER_RUN);
-				// obj.texture = res.texRun;
-				// obj.currentAnimation = res.ANIM_PLAYER_RUN;
 				break;
 			}
 		}
@@ -510,24 +532,29 @@ void update(SDLState const &state, GameState &gs, Resources &res, GameObject &ob
 			{
 				checkCollisions(state, gs, res, obj, objB, deltaTime);
 
-				// Grounded sensor
-				SDL_FRect sensor {
-					.x = obj.position.x + obj.collider.x,
-					.y = obj.position.y + obj.collider.y + obj.collider.h,
-					.w = obj.collider.w,
-					.h = 1,
-				};
-
-				SDL_FRect rectB {
-					.x = objB.position.x + objB.collider.x,
-					.y = objB.position.y + objB.collider.y,
-					.w = objB.collider.w,
-					.h = objB.collider.h,
-				};
-
-				if (SDL_HasRectIntersectionFloat(&sensor, &rectB))
+				if (objB.type == ObjectType::level)
 				{
-					foundGround = true;
+					// Grounded sensor
+					SDL_FRect sensor {
+						.x = obj.position.x + obj.collider.x,
+						.y = obj.position.y + obj.collider.y + obj.collider.h,
+						.w = obj.collider.w,
+						.h = 1,
+					};
+
+					SDL_FRect rectB {
+						.x = objB.position.x + objB.collider.x,
+						.y = objB.position.y + objB.collider.y,
+						.w = objB.collider.w,
+						.h = objB.collider.h,
+					};
+
+					SDL_FRect rectC { 0 };
+
+					if (SDL_GetRectIntersectionFloat(&sensor, &rectB, &rectC))
+					{
+						foundGround = true;
+					}
 				}
 			}
 		}
