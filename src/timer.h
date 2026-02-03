@@ -23,5 +23,5 @@ class Timer
 	bool isTimeout() const { return timeout; }
 	float getTime() const { return time; }
 	float getLength() const { return length; }
-	void reset() { time = 0; }
+	void reset() { time = 0; timeout = false; }
 };
