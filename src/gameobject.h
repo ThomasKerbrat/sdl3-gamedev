@@ -12,7 +12,7 @@ enum class PlayerState
 
 enum class BulletState
 {
-	moving, colliding, idle,
+	moving, colliding, inactive
 };
 
 struct PlayerData
