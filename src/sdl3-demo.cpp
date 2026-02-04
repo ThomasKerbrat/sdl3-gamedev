@@ -1,6 +1,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3_image/SDL_image.h>
+#include <SDL3_mixer/SDL_mixer.h>
 #include <array>
 #include <format>
 #include <glm/ext/vector_float2.hpp>
@@ -15,11 +16,14 @@ struct SDLState
 {
 	SDL_Window *window;
 	SDL_Renderer *renderer;
+	MIX_Mixer *mixer;
 	int width, height, logW, logH;
 	bool const *keys;
+	bool fullscreen;
 
 	SDLState() : keys(SDL_GetKeyboardState(nullptr))
 	{
+		fullscreen = false;
 	}
 };
 
@@ -76,6 +80,10 @@ struct Resources
 	SDL_Texture *texIdle, *texRun, *texBrick, *texGrass, *texGround, *texPanel,
 		*texSlide, *texBg1, *texBg2, *texBg3, *texBg4, *texBullet, *texBulletHit,
 		*texShoot, *texRunShoot, *texSlideShoot, *texEnemy, *texEnemyHit, *texEnemyDie;
+	
+	std::vector<MIX_Track*> tracks;
+	MIX_Track *trackShoot, *trackShootHit, *trackEnemyHit;
+	MIX_Track *trackMusic;
 
 	SDL_Texture *loadTextures(SDL_Renderer *renderer, std::string const &filepath)
 	{
@@ -83,6 +91,25 @@ struct Resources
 		SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
 		textures.push_back(tex);
 		return tex;
+	}
+
+	MIX_Track* loadSoundEffect(MIX_Mixer *mixer, std::string const &filepath)
+	{
+		MIX_Audio* audio = MIX_LoadAudio(mixer, filepath.c_str(), true);
+		MIX_Track* track = MIX_CreateTrack(mixer);
+		MIX_SetTrackGain(track, 0.5f);
+		MIX_SetTrackAudio(track, audio);
+		tracks.push_back(track);
+		return track;
+	}
+
+	MIX_Track* loadMusic(MIX_Mixer *mixer, std::string const &filepath)
+	{
+		MIX_Audio* audio = MIX_LoadAudio(mixer, filepath.c_str(), true);
+		MIX_Track* track = MIX_CreateTrack(mixer);
+		MIX_SetTrackGain(track, 0.3f);
+		MIX_SetTrackAudio(track, audio);
+		return track;
 	}
 
 	void load(SDLState &state)
@@ -120,6 +147,12 @@ struct Resources
 		texEnemy = loadTextures(state.renderer, "data/enemy.png");
 		texEnemyHit = loadTextures(state.renderer, "data/enemy_hit.png");
 		texEnemyDie = loadTextures(state.renderer, "data/enemy_die.png");
+
+		trackShoot = loadSoundEffect(state.mixer, "data/audio/shoot.wav");
+		trackShootHit = loadSoundEffect(state.mixer, "data/audio/wall_hit.wav");
+		trackEnemyHit = loadSoundEffect(state.mixer, "data/audio/enemy_hit.wav");
+
+		trackMusic = loadMusic(state.mixer, "data/audio/Juhani Junkala [Retro Game Music Pack] Level 1.mp3");
 	}
 
 	void unload()
@@ -128,6 +161,17 @@ struct Resources
 		{
 			SDL_DestroyTexture(tex);
 		}
+
+		for (MIX_Track *track : tracks)
+		{
+			MIX_Audio *audio = MIX_GetTrackAudio(track);
+			MIX_DestroyAudio(audio);
+			MIX_DestroyTrack(track);
+		}
+
+		MIX_Audio *audio = MIX_GetTrackAudio(trackMusic);
+		MIX_DestroyAudio(audio);
+		MIX_DestroyTrack(trackMusic);
 	}
 };
 
@@ -156,6 +200,10 @@ int main(int argc, char *argv[])
 	// Load game assets
 	Resources res;
 	res.load(state);
+	SDL_PropertiesID options = SDL_CreateProperties();
+	SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOPS_NUMBER, -1);
+	MIX_PlayTrack(res.trackMusic, options);
+	SDL_DestroyProperties(options);
 
 	// Setup game data
 	GameState gs(state);
@@ -195,6 +243,11 @@ int main(int argc, char *argv[])
 					if (event.key.scancode == SDL_SCANCODE_F12)
 					{
 						gs.debugMode = !gs.debugMode;
+					}
+					else if (event.key.scancode == SDL_SCANCODE_F11)
+					{
+						state.fullscreen = !state.fullscreen;
+						SDL_SetWindowFullscreen(state.window, state.fullscreen);
 					}
 					break;
 				}
@@ -304,7 +357,7 @@ bool initialize(SDLState &state)
 	}
 
 	// Create the window
-	state.window = SDL_CreateWindow("SDL3 Demo", state.width, state.height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
+	state.window = SDL_CreateWindow("SDL3 Demo", state.width, state.height, SDL_WINDOW_RESIZABLE);
 
 	if (!state.window)
 	{
@@ -325,7 +378,22 @@ bool initialize(SDLState &state)
 
 	// Configure presentation
 	SDL_SetRenderVSync(state.renderer, 1);
-	SDL_SetRenderLogicalPresentation(state.renderer, state.logW, state.logH, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+	SDL_SetRenderLogicalPresentation(state.renderer, state.logW, state.logH, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+
+	if (!MIX_Init())
+	{
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "Error initializing SDL3_mixer", state.window);
+		cleanup(state);
+		initSuccess = false;
+	}
+
+	state.mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
+	if (!state.mixer)
+	{
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", "Error creating mixer on default device", state.window);
+		cleanup(state);
+		initSuccess = false;
+	}
 
 	return initSuccess;
 }
@@ -334,6 +402,7 @@ void cleanup(SDLState &state)
 {
 	SDL_DestroyRenderer(state.renderer);
 	SDL_DestroyWindow(state.window);
+	MIX_Quit();
 	SDL_Quit();
 }
 
@@ -486,6 +555,8 @@ void update(SDLState const &state, GameState &gs, Resources &res, GameObject &ob
 					{
 						gs.bullets.push_back(bullet);
 					}
+
+					MIX_PlayTrack(res.trackShoot, 0);
 				}
 			}
 			else
@@ -748,6 +819,7 @@ void collisionResponse(SDLState const &state, GameState &gs, Resources &res,
 				{
 					case ObjectType::level:
 					{
+						MIX_PlayTrack(res.trackShootHit, 0);
 						break;
 					}
 					case ObjectType::enemy:
@@ -769,6 +841,7 @@ void collisionResponse(SDLState const &state, GameState &gs, Resources &res,
 								objB.texture = res.texEnemyDie;
 								objB.currentAnimation = res.ANIM_ENEMY_DIE;
 							}
+							MIX_PlayTrack(res.trackEnemyHit, 0);
 						}
 						else
 						{
